@@ -149,36 +149,52 @@ router.patch('/clients/:id/renew-subscription', authMiddleware, async (req, res)
 });
 
 // --- ROTAS DE SESSÕES ---
+// --- ROTAS DE SESSÕES ---
+
 router.post('/sessions/check-in', authMiddleware, async (req, res) => {
   await handleRequest(res, async () => {
-    const { client_id, station_id } = req.body; // Agora esperamos também o ID da estação
+    const { client_id, station_id } = req.body;
 
-    // 1. Verifica se a estação está disponível
+    // 1. Buscar dados do cliente, incluindo o saldo de horas
+    const clientResult = await db.query('SELECT hours_balance FROM clients WHERE id = $1', [client_id]);
+    const client = clientResult.rows[0];
+    if (!client) return res.status(404).json({ message: 'Cliente não encontrado.' });
+    if (client.hours_balance <= 0) return res.status(400).json({ message: 'Cliente sem saldo de horas.' });
+
+    // 2. Verificar se a estação está disponível
     const stationResult = await db.query('SELECT status FROM stations WHERE id = $1', [station_id]);
     const station = stationResult.rows[0];
     if (!station || station.status !== 'AVAILABLE') {
-      return res.status(409).json({ message: 'Esta estação não está disponível no momento.' });
+      return res.status(409).json({ message: 'Esta estação não está disponível (em uso ou em manutenção).' });
     }
 
-    // 2. Lógica de verificação do cliente (como antes)
-    const clientResult = await db.query('SELECT hours_balance FROM clients WHERE id = $1', [client_id]);
-    if (clientResult.rows.length === 0) return res.status(404).json({ message: 'Cliente não encontrado.' });
-    if (clientResult.rows[0].hours_balance <= 0) return res.status(400).json({ message: 'Cliente sem saldo de horas.' });
+    // 3. --- LÓGICA DE VERIFICAÇÃO DE CONFLITO ---
+    const startTime = new Date();
+    const balanceInMilliseconds = parseFloat(client.hours_balance) * 60 * 60 * 1000;
+    const predictedEndTime = new Date(startTime.getTime() + balanceInMilliseconds);
 
-    // 3. Inicia uma transação para garantir consistência
+    const checkOverlapSql = `
+      SELECT id, start_time FROM bookings
+      WHERE station_id = $1 AND (start_time, end_time) OVERLAPS ($2, $3)
+    `;
+    const overlapResult = await db.query(checkOverlapSql, [station_id, startTime, predictedEndTime]);
+
+    if (overlapResult.rows.length > 0) {
+      const conflictingBookingTime = new Date(overlapResult.rows[0].start_time).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      return res.status(409).json({ message: `Check-in bloqueado. Esta estação já possui um agendamento conflitante que começa às ${conflictingBookingTime}.` });
+    }
+
+    // 4. Se não houver conflitos, prosseguir com a transação de check-in
     await db.query('BEGIN');
-
-    // 4. Cria a sessão, agora com o station_id
-    const entry_time = new Date();
-    const insertResult = await db.query('INSERT INTO sessions (client_id, station_id, entry_time) VALUES ($1, $2, $3) RETURNING id', [client_id, station_id, entry_time]);
-
-    // 5. Atualiza o status da estação para 'IN_USE'
-    await db.query(`UPDATE stations SET status = 'IN_USE' WHERE id = $1`, [station_id]);
-
-    // 6. Finaliza a transação
-    await db.query('COMMIT');
-    
-    res.status(201).json({ message: 'Check-in realizado com sucesso!', session_id: insertResult.rows[0].id });
+    try {
+      const insertResult = await db.query('INSERT INTO sessions (client_id, station_id, entry_time) VALUES ($1, $2, $3) RETURNING id', [client_id, station_id, startTime]);
+      await db.query(`UPDATE stations SET status = 'IN_USE' WHERE id = $1`, [station_id]);
+      await db.query('COMMIT');
+      res.status(201).json({ message: 'Check-in realizado com sucesso!', session_id: insertResult.rows[0].id });
+    } catch (e) {
+      await db.query('ROLLBACK');
+      throw e; // O erro será pego pelo handleRequest
+    }
   });
 });
   
