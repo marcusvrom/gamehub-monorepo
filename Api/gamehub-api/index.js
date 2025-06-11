@@ -8,9 +8,9 @@ const routes = require('./routes');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configuração de CORS para Produção
+// --- CONFIGURAÇÃO DE CORS ABERTA PARA TODAS AS ORIGENS ---
 const corsOptions = {
-  origin: 'https://vemprogamehub.com',
+  origin: '*',
   methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
   allowedHeaders: 'Content-Type,Authorization',
   optionsSuccessStatus: 204
