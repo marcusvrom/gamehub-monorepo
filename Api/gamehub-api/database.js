@@ -17,7 +17,7 @@ const createTables = async () => {
 
     // Tabela de Admins
     await client.query(`CREATE TABLE IF NOT EXISTS admins (id SERIAL PRIMARY KEY, username VARCHAR(255) UNIQUE NOT NULL, password VARCHAR(255) NOT NULL)`);
-    const password = await bcrypt.hash('admin', 10);
+    const password = await bcrypt.hash('GH@gamehub@2025', 10);
     await client.query(`INSERT INTO admins (username, password) VALUES ('admin', $1) ON CONFLICT (username) DO NOTHING`, [password]);
     
     // Tabela de Clientes
