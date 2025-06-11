@@ -8,8 +8,7 @@ const routes = require('./routes');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// --- CONFIGURAÇÃO DE CORS PARA PRODUÇÃO ---
-// Define explicitamente que apenas seu frontend pode fazer requisições
+// Configuração de CORS para Produção
 const corsOptions = {
   origin: 'https://vemprogamehub.com',
   methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
@@ -17,16 +16,14 @@ const corsOptions = {
   optionsSuccessStatus: 204
 };
 
-// Usa as opções de CORS para todas as requisições
 app.use(cors(corsOptions));
-// Garante que as requisições OPTIONS (pre-flight) sejam tratadas corretamente
 app.options('*', cors(corsOptions));
+
 app.use(express.json());
 app.use('/api', routes);
 
-// --- 3. TAREFA AGENDADA PARA VERIFICAR ASSINATURAS ---
-// A expressão '0 1 * * *' significa: "Às 01:00, todos os dias"
-cron.schedule('0 1 * * *', () => {
+// Roda todo dia à 1h da manhã (fuso de São Paulo)
+cron.schedule('0 1 * * *', async () => { 
   console.log('Executando verificação diária de assinaturas vencidas...');
   
   const sql = `
@@ -37,25 +34,33 @@ cron.schedule('0 1 * * *', () => {
       AND next_billing_date <= CURRENT_DATE;
   `;
 
-  db.run(sql, function(err) {
-    if (err) {
-      console.error('Erro ao atualizar assinaturas vencidas:', err.message);
+  try {
+    const result = await db.query(sql);
+    if (result.rowCount > 0) {
+      console.log(`Verificação concluída. ${result.rowCount} assinaturas atualizadas para PENDENTE.`);
     } else {
-      console.log(`Verificação concluída. ${this.changes} assinaturas atualizadas para PENDENTE.`);
+      console.log('Verificação concluída. Nenhuma assinatura vencida encontrada.');
     }
-  });
+  } catch (err) {
+    console.error('Erro ao executar a tarefa agendada de assinaturas:', err.message);
+  }
 }, {
   scheduled: true,
-  timezone: "America/Sao_Paulo" // Garante que rode no fuso horário correto
+  timezone: "America/Sao_Paulo"
 });
 
 
-// Inicializa as tabelas do banco de dados (se não existirem)
-db.createTables().then(() => {
-  app.listen(PORT, () => {
-    console.log(`Servidor rodando na porta ${PORT}`);
-  });
-}).catch(err => {
-    console.error("Falha ao inicializar o banco de dados. O servidor não será iniciado.", err);
+// Função de inicialização para garantir que as tabelas sejam criadas antes de o servidor iniciar
+const startServer = async () => {
+  try {
+    await db.createTables(); // Espera a criação das tabelas
+    app.listen(PORT, () => {
+      console.log(`Servidor rodando na porta ${PORT}`);
+    });
+  } catch (err) {
+    console.error("Falha fatal ao inicializar. O servidor não será iniciado.", err);
     process.exit(1);
-});
+  }
+};
+
+startServer();
