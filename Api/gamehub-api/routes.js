@@ -151,15 +151,33 @@ router.patch('/clients/:id/renew-subscription', authMiddleware, async (req, res)
 // --- ROTAS DE SESSÕES ---
 router.post('/sessions/check-in', authMiddleware, async (req, res) => {
   await handleRequest(res, async () => {
-    const { client_id } = req.body;
+    const { client_id, station_id } = req.body; // Agora esperamos também o ID da estação
+
+    // 1. Verifica se a estação está disponível
+    const stationResult = await db.query('SELECT status FROM stations WHERE id = $1', [station_id]);
+    const station = stationResult.rows[0];
+    if (!station || station.status !== 'AVAILABLE') {
+      return res.status(409).json({ message: 'Esta estação não está disponível no momento.' });
+    }
+
+    // 2. Lógica de verificação do cliente (como antes)
     const clientResult = await db.query('SELECT hours_balance FROM clients WHERE id = $1', [client_id]);
-    const client = clientResult.rows[0];
-    if (!client) return res.status(404).json({ message: 'Cliente não encontrado.' });
-    if (client.hours_balance <= 0) return res.status(400).json({ message: 'Cliente sem saldo de horas.' });
-    const sessionResult = await db.query('SELECT id FROM sessions WHERE client_id = $1 AND exit_time IS NULL', [client_id]);
-    if (sessionResult.rows[0]) return res.status(409).json({ message: 'Este cliente já possui uma sessão de jogo ativa.' });
+    if (clientResult.rows.length === 0) return res.status(404).json({ message: 'Cliente não encontrado.' });
+    if (clientResult.rows[0].hours_balance <= 0) return res.status(400).json({ message: 'Cliente sem saldo de horas.' });
+
+    // 3. Inicia uma transação para garantir consistência
+    await db.query('BEGIN');
+
+    // 4. Cria a sessão, agora com o station_id
     const entry_time = new Date();
-    const insertResult = await db.query('INSERT INTO sessions (client_id, entry_time) VALUES ($1, $2) RETURNING id', [client_id, entry_time]);
+    const insertResult = await db.query('INSERT INTO sessions (client_id, station_id, entry_time) VALUES ($1, $2, $3) RETURNING id', [client_id, station_id, entry_time]);
+
+    // 5. Atualiza o status da estação para 'IN_USE'
+    await db.query(`UPDATE stations SET status = 'IN_USE' WHERE id = $1`, [station_id]);
+
+    // 6. Finaliza a transação
+    await db.query('COMMIT');
+    
     res.status(201).json({ message: 'Check-in realizado com sucesso!', session_id: insertResult.rows[0].id });
   });
 });
@@ -167,19 +185,53 @@ router.post('/sessions/check-in', authMiddleware, async (req, res) => {
 router.post('/sessions/check-out', authMiddleware, async (req, res) => {
   await handleRequest(res, async () => {
     const { client_id } = req.body;
-    const { rows } = await db.query(`SELECT * FROM sessions WHERE client_id = $1 AND exit_time IS NULL`, [client_id]);
+    const { rows } = await db.query(`SELECT id, station_id, entry_time FROM sessions WHERE client_id = $1 AND exit_time IS NULL`, [client_id]);
     const session = rows[0];
     if (!session) return res.status(404).json({ message: "Nenhuma sessão ativa encontrada para este cliente." });
 
     const entryTime = new Date(session.entry_time);
     const exitTime = new Date();
-    const durationMillis = exitTime.getTime() - entryTime.getTime();
-    const durationMinutes = Math.round(durationMillis / 60000);
-    const durationHours = durationMillis / (1000 * 60 * 60);
+    const durationMinutes = Math.round((exitTime.getTime() - entryTime.getTime()) / 60000);
+    const durationHours = (exitTime.getTime() - entryTime.getTime()) / (1000 * 60 * 60);
 
+    // Inicia a transação
+    await db.query('BEGIN');
+    // Atualiza a sessão
     await db.query(`UPDATE sessions SET exit_time = $1, duration_minutes = $2 WHERE id = $3`, [exitTime, durationMinutes, session.id]);
+    // Atualiza o saldo do cliente
     await db.query(`UPDATE clients SET hours_balance = hours_balance - $1 WHERE id = $2`, [durationHours, client_id]);
+    // LIBERA A ESTAÇÃO, MUDANDO SEU STATUS PARA 'AVAILABLE'
+    await db.query(`UPDATE stations SET status = 'AVAILABLE' WHERE id = $1`, [session.station_id]);
+    // Finaliza a transação
+    await db.query('COMMIT');
+
     res.json({ message: `Check-out realizado. Duração: ${durationMinutes} minutos.` });
+  });
+});
+
+router.get('/sessions/active', authMiddleware, async (req, res) => {
+  await handleRequest(res, async () => {
+    // Agora fazemos JOIN também com a tabela de estações
+    const sql = `
+      SELECT 
+        s.id, s.entry_time, 
+        c.name as client_name, c.hours_balance, c.id AS client_id,
+        st.name as station_name 
+      FROM sessions s 
+      JOIN clients c ON s.client_id = c.id
+      JOIN stations st ON s.station_id = st.id
+      WHERE s.exit_time IS NULL
+    `;
+    const { rows } = await db.query(sql);
+    
+    // Lógica de cálculo da saída prevista continua a mesma
+    const sessionsWithPrediction = rows.map(session => {
+      const entryTime = new Date(session.entry_time);
+      const balanceInMilliseconds = parseFloat(session.hours_balance) * 60 * 60 * 1000;
+      const predictedExitTimestamp = entryTime.getTime() + balanceInMilliseconds;
+      return { ...session, predicted_exit_time: new Date(predictedExitTimestamp).toISOString() };
+    });
+    res.json(sessionsWithPrediction);
   });
 });
 
@@ -188,20 +240,6 @@ router.get('/sessions/client/:client_id', authMiddleware, async (req, res) => {
     const { client_id } = req.params;
     const { rows } = await db.query('SELECT * FROM sessions WHERE client_id = $1 ORDER BY entry_time DESC', [client_id]);
     res.json(rows);
-  });
-});
-  
-router.get('/sessions/active', authMiddleware, async (req, res) => {
-  await handleRequest(res, async () => {
-    const sql = `SELECT s.id, s.entry_time, c.name, c.hours_balance, c.id AS client_id FROM sessions s JOIN clients c ON s.client_id = c.id WHERE s.exit_time IS NULL`;
-    const { rows } = await db.query(sql);
-    const sessionsWithPrediction = rows.map(session => {
-      const entryTime = new Date(session.entry_time);
-      const balanceInMilliseconds = parseFloat(session.hours_balance) * 60 * 60 * 1000;
-      const predictedExitTimestamp = entryTime.getTime() + balanceInMilliseconds;
-      return { ...session, predicted_exit_time: new Date(predictedExitTimestamp).toISOString() };
-    });
-    res.json(sessionsWithPrediction);
   });
 });
 
