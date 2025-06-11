@@ -8,7 +8,19 @@ const routes = require('./routes');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors());
+// --- CONFIGURAÇÃO DE CORS PARA PRODUÇÃO ---
+// Define explicitamente que apenas seu frontend pode fazer requisições
+const corsOptions = {
+  origin: 'https://vemprogamehub.com',
+  methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+  allowedHeaders: 'Content-Type,Authorization',
+  optionsSuccessStatus: 204
+};
+
+// Usa as opções de CORS para todas as requisições
+app.use(cors(corsOptions));
+// Garante que as requisições OPTIONS (pre-flight) sejam tratadas corretamente
+app.options('*', cors(corsOptions));
 app.use(express.json());
 app.use('/api', routes);
 
@@ -38,6 +50,12 @@ cron.schedule('0 1 * * *', () => {
 });
 
 
-app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
+// Inicializa as tabelas do banco de dados (se não existirem)
+db.createTables().then(() => {
+  app.listen(PORT, () => {
+    console.log(`Servidor rodando na porta ${PORT}`);
+  });
+}).catch(err => {
+    console.error("Falha ao inicializar o banco de dados. O servidor não será iniciado.", err);
+    process.exit(1);
 });
