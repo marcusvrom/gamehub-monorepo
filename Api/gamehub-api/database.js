@@ -4,9 +4,7 @@ const bcrypt = require('bcryptjs');
 // O Pool irá se conectar usando a URL do banco fornecida pelo ambiente
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
-  }
+  ssl: false
 });
 
 const createTables = async () => {
