@@ -15,17 +15,40 @@ const handleRequest = async (res, callback) => {
   }
 };
 
-// Rota para o resumo do dashboard
+// Rota para o resumo do dashboard (VERSÃO CORRIGIDA COM FUSO HORÁRIO)
 router.get('/dashboard-summary', authMiddleware, async (req, res) => {
     await handleRequest(res, async () => {
-        const today = new Date().toISOString().split('T')[0];
+        const timezone = 'America/Sao_Paulo';
 
-        // Usamos Promise.all para rodar as queries em paralelo
+        // Usamos Promise.all para rodar as queries em paralelo, agora com a conversão de fuso horário
         const [revenueToday, revenue7Days, sessionsToday, newClientsToday] = await Promise.all([
-            db.query(`SELECT SUM(amount_paid) as total FROM transactions WHERE date(transaction_date) = $1`, [today]),
-            db.query(`SELECT SUM(amount_paid) as total FROM transactions WHERE transaction_date >= CURRENT_DATE - INTERVAL '7 days'`),
-            db.query(`SELECT COUNT(id) as total FROM sessions WHERE date(entry_time) = $1`, [today]),
-            db.query(`SELECT COUNT(id) as total FROM clients WHERE date(created_at) = $1`, [today])
+            // Faturamento do dia, considerando o fuso horário local
+            db.query(`
+                SELECT SUM(amount_paid) as total 
+                FROM transactions 
+                WHERE date(transaction_date AT TIME ZONE $1) = date(NOW() AT TIME ZONE $1)
+            `, [timezone]),
+            
+            // Faturamento dos últimos 7 dias
+            db.query(`
+                SELECT SUM(amount_paid) as total 
+                FROM transactions 
+                WHERE (transaction_date AT TIME ZONE $1)::date > (NOW() AT TIME ZONE $1)::date - INTERVAL '7 days'
+            `, [timezone]),
+
+            // Sessões iniciadas no dia de hoje local
+            db.query(`
+                SELECT COUNT(id) as total 
+                FROM sessions 
+                WHERE date(entry_time AT TIME ZONE $1) = date(NOW() AT TIME ZONE $1)
+            `, [timezone]),
+
+            // Novos clientes registrados no dia de hoje local
+            db.query(`
+                SELECT COUNT(id) as total 
+                FROM clients 
+                WHERE date(created_at AT TIME ZONE $1) = date(NOW() AT TIME ZONE $1)
+            `, [timezone])
         ]);
 
         res.json({
