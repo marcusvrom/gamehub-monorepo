@@ -63,16 +63,30 @@ router.get('/dashboard-summary', authMiddleware, async (req, res) => {
 // Rota para dados do gráfico de horários de pico (últimos 30 dias)
 router.get('/peak-hours', authMiddleware, async (req, res) => {
     await handleRequest(res, async () => {
+        const timezone = 'America/Sao_Paulo';
+        
+        // Esta query mais avançada garante que todas as horas de funcionamento (14-22) apareçam,
+        // mesmo que não tenham tido sessões.
         const sql = `
-            SELECT 
-                EXTRACT(HOUR FROM entry_time AT TIME ZONE 'America/Sao_Paulo') as hour, 
-                COUNT(id) as session_count
-            FROM sessions
-            WHERE entry_time >= CURRENT_DATE - INTERVAL '30 days'
-            GROUP BY hour
-            ORDER BY hour;
+            WITH all_hours AS (
+                SELECT generate_series(14, 22) AS hour
+            ),
+            session_counts AS (
+                SELECT 
+                    EXTRACT(HOUR FROM entry_time AT TIME ZONE $1) as hour, 
+                    COUNT(id) as session_count
+                FROM sessions
+                WHERE entry_time >= CURRENT_DATE - INTERVAL '30 days'
+                GROUP BY hour
+            )
+            SELECT
+                ah.hour,
+                COALESCE(sc.session_count, 0)::integer as session_count
+            FROM all_hours ah
+            LEFT JOIN session_counts sc ON ah.hour = sc.hour
+            ORDER BY ah.hour;
         `;
-        const { rows } = await db.query(sql);
+        const { rows } = await db.query(sql, [timezone]);
         res.json(rows);
     });
 });
