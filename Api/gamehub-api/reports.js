@@ -41,7 +41,9 @@ router.get('/dashboard-summary', authMiddleware, async (req, res) => {
 router.get('/peak-hours', authMiddleware, async (req, res) => {
     await handleRequest(res, async () => {
         const sql = `
-            SELECT EXTRACT(HOUR FROM entry_time) as hour, COUNT(id) as session_count
+            SELECT 
+                EXTRACT(HOUR FROM entry_time AT TIME ZONE 'America/Sao_Paulo') as hour, 
+                COUNT(id) as session_count
             FROM sessions
             WHERE entry_time >= CURRENT_DATE - INTERVAL '30 days'
             GROUP BY hour
