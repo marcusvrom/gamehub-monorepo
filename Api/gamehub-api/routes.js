@@ -71,11 +71,11 @@ router.get('/clients/:id', authMiddleware, async (req, res) => {
 router.put('/clients/:id', authMiddleware, async (req, res) => {
   await handleRequest(res, async () => {
     const { id } = req.params;
-    const { name, birth_date, cpf, phone, email, address, neighborhood, city, client_type, subscription_status, subscription_date, next_billing_date, guardian_name, guardian_cpf, guardian_phone, guardian_relationship, agreed_to_terms, agreed_to_marketing } = req.body;
+    const { name, birth_date, cpf, phone, email, address, neighborhood, city, client_type, subscription_status, subscription_date, next_billing_date, guardian_name, guardian_cpf, guardian_phone, guardian_relationship, hours_balance, agreed_to_terms, agreed_to_marketing } = req.body;
     if (!name || !cpf) return res.status(400).json({ message: 'Nome e CPF são obrigatórios.' });
     
-    const sql = `UPDATE clients SET name = $1, birth_date = $2, cpf = $3, phone = $4, email = $5, address = $6, neighborhood = $7, city = $8, client_type = $9, subscription_status = $10, subscription_date = $11, next_billing_date = $12, guardian_name = $13, guardian_cpf = $14, guardian_phone = $15, guardian_relationship = $16, agreed_to_terms = $17, agreed_to_marketing = $18 WHERE id = $19`;
-    const params = [name, birth_date, cpf, phone, email, address, neighborhood, city, client_type, subscription_status, subscription_date, next_billing_date, guardian_name, guardian_cpf, guardian_phone, guardian_relationship, agreed_to_terms, agreed_to_marketing, id];
+    const sql = `UPDATE clients SET name = $1, birth_date = $2, cpf = $3, phone = $4, email = $5, address = $6, neighborhood = $7, city = $8, client_type = $9, subscription_status = $10, subscription_date = $11, next_billing_date = $12, guardian_name = $13, guardian_cpf = $14, guardian_phone = $15, guardian_relationship = $16, hours_balance = $17, agreed_to_terms = $18, agreed_to_marketing = $19 WHERE id = $20`;
+    const params = [name, birth_date, cpf, phone, email, address, neighborhood, city, client_type, subscription_status, subscription_date, next_billing_date, guardian_name, guardian_cpf, guardian_phone, guardian_relationship, hours_balance, agreed_to_terms, agreed_to_marketing, id];
     const result = await db.query(sql, params);
 
     if (result.rowCount === 0) return res.status(404).json({ message: "Cliente não encontrado" });
