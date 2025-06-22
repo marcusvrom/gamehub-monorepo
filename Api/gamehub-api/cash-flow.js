@@ -2,7 +2,17 @@ const express = require('express');
 const router = express.Router();
 const db = require('./database');
 const authMiddleware = require('./auth');
-const handleRequest = require('./utils').handleRequest;
+
+const handleRequest = async (res, callback) => {
+  try {
+    await callback();
+  } catch (err) {
+    console.error('ERRO NA ROTA DE CAIXA:', err.stack);
+    if (!res.headersSent) {
+      res.status(500).json({ message: 'Erro interno do servidor.', error: err.message });
+    }
+  }
+};
 
 const TIMEZONE = 'America/Sao_Paulo';
 
