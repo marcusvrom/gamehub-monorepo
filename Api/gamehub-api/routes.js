@@ -3,23 +3,9 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const db = require('./database');
 const authMiddleware = require('./auth');
+const handleRequest = require('./utils').handleRequest;
 
 const router = express.Router();
-
-// Função auxiliar para centralizar o tratamento de erros
-const handleRequest = async (res, callback) => {
-  try {
-    await callback();
-  } catch (err) {
-    console.error('ERRO NA ROTA:', err.stack);
-    if (!res.headersSent) {
-      if (err.code === '23505') { 
-        return res.status(409).json({ message: 'Erro: Dados duplicados. A informação já pode estar cadastrada.', code: err.code });
-      }
-      res.status(500).json({ message: 'Erro interno do servidor.', error: err.message });
-    }
-  }
-};
 
 // --- ROTA DE LOGIN ---
 router.post('/login', async (req, res) => {
@@ -110,7 +96,7 @@ router.post('/clients/:id/add-hours-transaction', authMiddleware, async (req, re
 router.post('/clients/:id/buy-package', authMiddleware, async (req, res) => {
   await handleRequest(res, async () => {
     const { id: client_id } = req.params;
-    const { package_id } = req.body;
+    const { package_id, payment_method } = req.body;
     const packageResult = await db.query('SELECT * FROM packages WHERE id = $1', [package_id]);
     const packageData = packageResult.rows[0];
     if (!packageData) return res.status(404).json({ message: 'Pacote não encontrado.' });
@@ -118,7 +104,12 @@ router.post('/clients/:id/buy-package', authMiddleware, async (req, res) => {
     const { hours_included, price, name: packageName } = packageData;
     await db.query('BEGIN');
     await db.query(`UPDATE clients SET hours_balance = hours_balance + $1 WHERE id = $2`, [hours_included, client_id]);
-    await db.query(`INSERT INTO transactions (client_id, transaction_type, hours_added, amount_paid, notes) VALUES ($1, 'PACKAGE_PURCHASE', $2, $3, $4)`, [client_id, hours_included, price, `Compra do ${packageName}`]);
+    const insertTransactionSql = `
+        INSERT INTO transactions (client_id, transaction_type, hours_added, amount_paid, notes, payment_method) 
+        VALUES ($1, 'PACKAGE_PURCHASE', $2, $3, $4, $5)
+    `;
+    await db.query(insertTransactionSql, [client_id, hours_included, price, `Compra do ${packageName}`, payment_method]);
+
     await db.query('COMMIT');
     res.status(200).json({ message: 'Pacote comprado e horas adicionadas com sucesso!' });
   });
