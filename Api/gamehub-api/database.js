@@ -46,13 +46,22 @@ const createTables = async () => {
     await client.query(`CREATE TABLE IF NOT EXISTS cash_flow_records (id SERIAL PRIMARY KEY, record_date DATE NOT NULL UNIQUE, opening_balance NUMERIC(10, 2) NOT NULL, closing_balance NUMERIC(10, 2), revenue_calculated_electronic NUMERIC(10, 2), revenue_cash NUMERIC(10, 2), expenses NUMERIC(10, 2), status VARCHAR(50) DEFAULT 'ABERTO' NOT NULL, opened_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP, closed_at TIMESTAMPTZ)`);
     
     // Tabela de Transações
-    await client.query(`CREATE TABLE IF NOT EXISTS transactions (id SERIAL PRIMARY KEY, client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE, transaction_type VARCHAR(50) NOT NULL, hours_added NUMERIC(10, 2), amount_paid NUMERIC(10, 2), rate_used NUMERIC(10, 2), notes TEXT, transaction_date TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS transactions (
+        id SERIAL PRIMARY KEY, 
+        client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE, 
+        transaction_type VARCHAR(50) NOT NULL, 
+        hours_added NUMERIC(10, 2), 
+        amount_paid NUMERIC(10, 2), 
+        rate_used NUMERIC(10, 2), 
+        notes TEXT, 
+        payment_method VARCHAR(50) NOT NULL DEFAULT 'OUTRO', -- <<-- COLUNA ADICIONADA AQUI
+        transaction_date TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
     
     // Tabela de Configurações
     await client.query(`CREATE TABLE IF NOT EXISTS settings (setting_key VARCHAR(255) PRIMARY KEY NOT NULL, setting_value TEXT NOT NULL)`);
-    
-    // Modifique a tabela transactions
-    await client.query(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) NOT NULL DEFAULT 'OUTRO'`);
 
     // Insere dados padrão nas Configurações
     await client.query(`INSERT INTO settings (setting_key, setting_value) VALUES ('hourly_rate_regular', '10.00') ON CONFLICT (setting_key) DO NOTHING`);
