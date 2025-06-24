@@ -95,12 +95,12 @@ router.delete('/clients/:id', authMiddleware, async (req, res) => {
 router.post('/clients/:id/add-hours-transaction', authMiddleware, async (req, res) => {
   await handleRequest(res, async () => {
     const { id: client_id } = req.params;
-    const { hours_to_add, amount_paid, rate_used } = req.body;
+    const { hours_to_add, amount_paid, rate_used, payment_method } = req.body;
     if (!hours_to_add || !amount_paid) return res.status(400).json({ message: 'Dados da transação inválidos.' });
 
     await db.query('BEGIN');
     await db.query(`UPDATE clients SET hours_balance = hours_balance + $1 WHERE id = $2`, [hours_to_add, client_id]);
-    await db.query(`INSERT INTO transactions (client_id, transaction_type, hours_added, amount_paid, rate_used) VALUES ($1, 'ADD_HOURS', $2, $3, $4)`, [client_id, hours_to_add, amount_paid, rate_used]);
+    await db.query(`INSERT INTO transactions (client_id, transaction_type, hours_added, amount_paid, rate_used, payment_method) VALUES ($1, 'ADD_HOURS', $2, $3, $4)`, [client_id, hours_to_add, amount_paid, rate_used, payment_method]);
     await db.query('COMMIT');
     res.status(201).json({ message: 'Horas adicionadas e transação registrada com sucesso!' });
   });
