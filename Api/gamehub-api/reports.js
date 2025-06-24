@@ -93,56 +93,44 @@ router.get('/peak-hours', authMiddleware, async (req, res) => {
 
 router.get('/financial-details', authMiddleware, async (req, res) => {
     await handleRequest(res, async () => {
-        const { startDate, endDate } = req.query;
+        const { startDate, endDate, page = 1, pageSize = 10 } = req.query;
         if (!startDate || !endDate) {
             return res.status(400).json({ message: 'As datas de início e fim são obrigatórias.' });
         }
 
+        const offset = (page - 1) * pageSize;
         const timezone = 'America/Sao_Paulo';
         const rangeFilter = `WHERE transaction_date AT TIME ZONE '${timezone}' BETWEEN $1 AND $2`;
 
-        // 1. Query para o resumo (KPIs)
-        const summarySql = `
-            SELECT
-                COALESCE(SUM(amount_paid), 0) as "totalRevenue",
-                COUNT(id) as "totalTransactions",
-                SUM(CASE WHEN payment_method = 'PIX' THEN amount_paid ELSE 0 END) as "revenueByPix",
-                SUM(CASE WHEN payment_method IN ('CREDITO', 'DEBITO') THEN amount_paid ELSE 0 END) as "revenueByCard",
-                SUM(CASE WHEN payment_method = 'DINHEIRO' THEN amount_paid ELSE 0 END) as "revenueByCash"
-            FROM transactions ${rangeFilter}
-        `;
-
-        // 2. Query para o gráfico de faturamento diário
-        const dailyRevenueSql = `
-            SELECT 
-                date(transaction_date AT TIME ZONE '${timezone}') as "name", 
-                SUM(amount_paid) as "value"
-            FROM transactions
-            ${rangeFilter}
-            GROUP BY date(transaction_date AT TIME ZONE '${timezone}')
-            ORDER BY name
-        `;
-        
-        // 3. Query para a lista detalhada de transações
         const transactionsSql = `
             SELECT t.*, c.name as client_name 
             FROM transactions t
             LEFT JOIN clients c ON t.client_id = c.id
             ${rangeFilter}
             ORDER BY transaction_date DESC
+            LIMIT $3 OFFSET $4
         `;
 
-        // Executa todas as queries em paralelo
-        const [summaryResult, dailyRevenueResult, transactionsResult] = await Promise.all([
-            db.query(summarySql, [startDate, endDate]),
-            db.query(dailyRevenueSql, [startDate, endDate]),
-            db.query(transactionsSql, [startDate, endDate])
+        const totalCountSql = `SELECT COUNT(id) as total FROM transactions ${rangeFilter}`;
+
+        const [summaryResult, dailyRevenueResult, transactionsResult, totalCountResult] = await Promise.all([
+            db.query(`SELECT COALESCE(SUM(amount_paid), 0) as "totalRevenue", ... FROM transactions ${rangeFilter}`, [startDate, endDate]),
+            db.query(`SELECT date(transaction_date AT TIME ZONE '${timezone}') as "name", ... FROM transactions ${rangeFilter} GROUP BY ...`, [startDate, endDate]),
+            db.query(transactionsSql, [startDate, endDate, pageSize, offset]),
+            db.query(totalCountSql, [startDate, endDate])
         ]);
+        
+        const totalItems = totalCountResult.rows[0].total;
 
         res.json({
             summary: summaryResult.rows[0],
             dailyRevenue: dailyRevenueResult.rows,
-            transactions: transactionsResult.rows
+            transactions: {
+                items: transactionsResult.rows,
+                totalItems: Number(totalItems),
+                currentPage: Number(page),
+                totalPages: Math.ceil(totalItems / pageSize)
+            }
         });
     });
 });
