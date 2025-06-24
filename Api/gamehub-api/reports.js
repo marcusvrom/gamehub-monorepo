@@ -147,4 +147,33 @@ router.get('/financial-details', authMiddleware, async (req, res) => {
     });
 });
 
+router.get('/station-usage', authMiddleware, async (req, res) => {
+    await handleRequest(res, async () => {
+        const { startDate, endDate } = req.query;
+        if (!startDate || !endDate) {
+            return res.status(400).json({ message: 'As datas de início e fim são obrigatórias.' });
+        }
+
+        const timezone = 'America/Sao_Paulo';
+        const sql = `
+            SELECT
+                st.type,
+                COUNT(s.id) AS total_sessions,
+                COUNT(DISTINCT s.client_id) AS unique_users,
+                COALESCE(SUM(s.duration_minutes), 0) AS total_minutes_played,
+                COALESCE(AVG(s.duration_minutes), 0) AS average_session_minutes
+            FROM sessions s
+            JOIN stations st ON s.station_id = st.id
+            WHERE 
+                s.exit_time IS NOT NULL AND
+                s.entry_time AT TIME ZONE $1 BETWEEN $2 AND $3
+            GROUP BY st.type
+            ORDER BY total_minutes_played DESC;
+        `;
+
+        const { rows } = await db.query(sql, [timezone, startDate, endDate]);
+        res.json(rows);
+    });
+});
+
 module.exports = router;
