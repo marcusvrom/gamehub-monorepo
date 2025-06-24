@@ -106,6 +106,30 @@ router.post('/clients/:id/add-hours-transaction', authMiddleware, async (req, re
   });
 });
 
+router.patch('/clients/:id/set-balance', authMiddleware, async (req, res) => {
+  await handleRequest(res, async () => {
+    const { id } = req.params;
+    const { new_balance } = req.body;
+
+    if (new_balance === undefined || isNaN(new_balance) || new_balance < 0) {
+      return res.status(400).json({ message: 'O novo saldo de horas é inválido.' });
+    }
+
+    const sql = `UPDATE clients SET hours_balance = $1 WHERE id = $2`;
+    const result = await db.query(sql, [new_balance, id]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'Cliente não encontrado.' });
+    }
+    
+    const { rows } = await db.query('SELECT hours_balance FROM clients WHERE id = $1', [id]);
+    res.json({ 
+        message: `Saldo do cliente atualizado com sucesso!`,
+        new_balance: rows[0].hours_balance 
+    });
+  });
+});
+
 router.post('/clients/:id/buy-package', authMiddleware, async (req, res) => {
   await handleRequest(res, async () => {
     const { id: client_id } = req.params;
@@ -152,7 +176,6 @@ router.patch('/clients/:id/renew-subscription', authMiddleware, async (req, res)
   });
 });
 
-// --- ROTAS DE SESSÕES ---
 // --- ROTAS DE SESSÕES ---
 
 router.post('/sessions/check-in', authMiddleware, async (req, res) => {
