@@ -100,7 +100,7 @@ router.post('/clients/:id/add-hours-transaction', authMiddleware, async (req, re
 
     await db.query('BEGIN');
     await db.query(`UPDATE clients SET hours_balance = hours_balance + $1 WHERE id = $2`, [hours_to_add, client_id]);
-    await db.query(`INSERT INTO transactions (client_id, transaction_type, hours_added, amount_paid, rate_used, payment_method) VALUES ($1, 'ADD_HOURS', $2, $3, $4)`, [client_id, hours_to_add, amount_paid, rate_used, payment_method]);
+    await db.query(`INSERT INTO transactions (client_id, transaction_type, hours_added, amount_paid, rate_used, payment_method) VALUES ($1, 'ADD_HOURS', $2, $3, $4, $5)`, [client_id, hours_to_add, amount_paid, rate_used, payment_method]);
     await db.query('COMMIT');
     res.status(201).json({ message: 'Horas adicionadas e transação registrada com sucesso!' });
   });
