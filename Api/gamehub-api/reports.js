@@ -102,6 +102,28 @@ router.get('/financial-details', authMiddleware, async (req, res) => {
         const timezone = 'America/Sao_Paulo';
         const rangeFilter = `WHERE transaction_date AT TIME ZONE '${timezone}' BETWEEN $1 AND $2`;
 
+        // Query 1: Resumo dos KPIs (versão completa)
+        const summarySql = `
+            SELECT
+                COALESCE(SUM(amount_paid), 0) AS "totalRevenue",
+                COUNT(id) AS "totalTransactions",
+                COALESCE(SUM(CASE WHEN payment_method = 'PIX' THEN amount_paid ELSE 0 END), 0) AS "revenueByPix",
+                COALESCE(SUM(CASE WHEN payment_method IN ('CREDITO', 'DEBITO') THEN amount_paid ELSE 0 END), 0) AS "revenueByCard",
+                COALESCE(SUM(CASE WHEN payment_method = 'DINHEIRO' THEN amount_paid ELSE 0 END), 0) AS "revenueByCash"
+            FROM transactions ${rangeFilter}
+        `;
+
+        // Query 2: Faturamento diário para o gráfico (versão completa)
+        const dailyRevenueSql = `
+            SELECT 
+                date(transaction_date AT TIME ZONE '${timezone}') AS "name", 
+                SUM(amount_paid) AS "value"
+            FROM transactions ${rangeFilter}
+            GROUP BY date(transaction_date AT TIME ZONE '${timezone}')
+            ORDER BY name ASC
+        `;
+        
+        // Query 3: Lista detalhada de transações com paginação (sem alterações)
         const transactionsSql = `
             SELECT t.*, c.name as client_name 
             FROM transactions t
@@ -111,11 +133,13 @@ router.get('/financial-details', authMiddleware, async (req, res) => {
             LIMIT $3 OFFSET $4
         `;
 
+        // Query 4: Contagem total de transações para paginação (sem alterações)
         const totalCountSql = `SELECT COUNT(id) as total FROM transactions ${rangeFilter}`;
 
+        // Executa todas as queries completas em paralelo
         const [summaryResult, dailyRevenueResult, transactionsResult, totalCountResult] = await Promise.all([
-            db.query(`SELECT COALESCE(SUM(amount_paid), 0) as "totalRevenue", ... FROM transactions ${rangeFilter}`, [startDate, endDate]),
-            db.query(`SELECT date(transaction_date AT TIME ZONE '${timezone}') as "name", ... FROM transactions ${rangeFilter} GROUP BY ...`, [startDate, endDate]),
+            db.query(summarySql, [startDate, endDate]),
+            db.query(dailyRevenueSql, [startDate, endDate]),
             db.query(transactionsSql, [startDate, endDate, pageSize, offset]),
             db.query(totalCountSql, [startDate, endDate])
         ]);
