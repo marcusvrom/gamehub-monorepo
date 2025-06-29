@@ -119,6 +119,7 @@ const createTables = async () => {
         title VARCHAR(255) NOT NULL,
         station_id INTEGER NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
         media_type VARCHAR(10) NOT NULL CHECK (media_type IN ('Físico', 'Digital')),
+        purchase_price NUMERIC(10, 2) DEFAULT 0,
         purchase_date DATE,
         notes TEXT,
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
