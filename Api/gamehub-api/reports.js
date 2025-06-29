@@ -100,36 +100,51 @@ router.get('/financial-details', authMiddleware, async (req, res) => {
         
         const offset = (page - 1) * pageSize;
         const timezone = 'America/Sao_Paulo';
-        const rangeFilter = `WHERE T.revenue_date AT TIME ZONE '${timezone}' BETWEEN $1 AND $2`;
-
+        
+        // 1. A tabela virtual agora une transações de horas com ITENS de vendas
         const baseQuery = `
-            WITH all_transactions AS (
-                SELECT 
-                    'HORAS/PACOTE' as sale_type, t.id, t.transaction_date as revenue_date, c.name as client_name, 
-                    t.notes, t.amount_paid, t.payment_method, NULL as product_name, t.hours_added as quantity_sold
+            WITH all_events AS (
+                -- Parte A: Transações de Horas e Pacotes
+                SELECT
+                    t.id,
+                    t.transaction_date AS event_date,
+                    'HORAS/PACOTE' AS event_type,
+                    t.notes AS description,
+                    t.amount_paid AS value,
+                    t.payment_method,
+                    c.name AS client_name,
+                    t.hours_added AS quantity
                 FROM transactions t
                 LEFT JOIN clients c ON t.client_id = c.id
                 
                 UNION ALL
 
-                SELECT 
-                    'PRODUTO' as sale_type, s.id, s.sale_date as revenue_date, c.name as client_name, 
-                    p.name as notes, si.price_per_item * si.quantity_sold as amount_paid, 
-                    s.payment_method, p.name as product_name, si.quantity_sold
-                FROM sales s
-                JOIN sale_items si ON s.id = si.sale_id
+                -- Parte B: Itens de Vendas de Produtos
+                SELECT
+                    si.id,
+                    s.sale_date AS event_date,
+                    'PRODUTO' AS event_type,
+                    p.name AS description, -- A descrição agora é o nome do produto
+                    si.price_per_item * si.quantity_sold AS value,
+                    s.payment_method,
+                    COALESCE(c.name, 'Venda Avulsa') AS client_name,
+                    si.quantity_sold as quantity
+                FROM sale_items si
+                JOIN sales s ON si.sale_id = s.id
                 JOIN products p ON si.product_id = p.id
                 LEFT JOIN clients c ON s.client_id = c.id
             )
-            SELECT * FROM all_transactions T
+            SELECT * FROM all_events E
         `;
 
-        const transactionsSql = `${baseQuery} ${rangeFilter} ORDER BY T.revenue_date DESC LIMIT $3 OFFSET $4`;
-        const totalCountSql = `WITH all_transactions AS (SELECT id, transaction_date AS revenue_date FROM transactions UNION ALL SELECT id, sale_date AS revenue_date FROM sales) SELECT COUNT(id) AS total FROM all_transactions T ${rangeFilter}`;
+        const rangeFilter = `WHERE E.event_date AT TIME ZONE '${timezone}' BETWEEN $1 AND $2`;
 
-        // Executa a busca de dados do resumo e das transações paginadas em paralelo
+        // 2. As queries de paginação rodam sobre essa nova estrutura
+        const transactionsSql = `${baseQuery} ${rangeFilter} ORDER BY E.event_date DESC LIMIT $3 OFFSET $4`;
+        const totalCountSql = `WITH all_events AS (SELECT id, transaction_date AS event_date FROM transactions UNION ALL SELECT id, sale_date AS event_date FROM sales) SELECT COUNT(*) AS total FROM all_events E ${rangeFilter}`;
+
         const [summaryAndChartData, transactionsResult, totalCountResult] = await Promise.all([
-            getSummaryData(startDate, endDate, timezone), // Chama a nova função real
+            getSummaryData(startDate, endDate, timezone),
             db.query(transactionsSql, [startDate, endDate, pageSize, offset]),
             db.query(totalCountSql, [startDate, endDate])
         ]);
@@ -148,6 +163,7 @@ router.get('/financial-details', authMiddleware, async (req, res) => {
         });
     });
 });
+
 
 // Nova rota para o gráfico de produtos mais vendidos
 router.get('/top-products', authMiddleware, async (req, res) => {
