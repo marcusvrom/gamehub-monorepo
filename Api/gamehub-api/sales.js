@@ -7,10 +7,10 @@ const handleRequest = async (res, callback) => {
   try {
     await callback();
   } catch (err) {
-    console.error('ERRO NA ROTA DE PRODUTOS:', err.stack);
+    console.error('ERRO NA ROTA DE VENDAS:', err.stack);
     if (!res.headersSent) {
       if (err.code === '23505') { // Erro de violação de constraint única (ex: SKU duplicado)
-        return res.status(409).json({ message: 'Erro: SKU já cadastrado.', code: err.code });
+        return res.status(409).json({ message: 'Erro: VENDA já cadastrada.', code: err.code });
       }
       res.status(500).json({ message: 'Erro interno do servidor.', error: err.message });
     }
