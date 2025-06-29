@@ -141,6 +141,20 @@ const createTables = async () => {
       )
     `);
 
+    // Tabela de Registros de Eventos
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS event_registrations (
+        id SERIAL PRIMARY KEY,
+        event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+        client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+        registration_date TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        payment_status VARCHAR(50) DEFAULT 'PENDENTE' NOT NULL,
+        payment_method VARCHAR(50),
+        amount_paid NUMERIC(10, 2),
+        UNIQUE (event_id, client_id)
+      )
+    `);
+
     // Tabela de Configurações
     await client.query(
       `CREATE TABLE IF NOT EXISTS settings (setting_key VARCHAR(255) PRIMARY KEY NOT NULL, setting_value TEXT NOT NULL)`
