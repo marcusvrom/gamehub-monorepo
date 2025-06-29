@@ -69,7 +69,7 @@ router.get('/peak-hours', authMiddleware, async (req, res) => {
         // mesmo que não tenham tido sessões.
         const sql = `
             WITH all_hours AS (
-                SELECT generate_series(14, 22) AS hour
+                SELECT generate_series(9, 22) AS hour
             ),
             session_counts AS (
                 SELECT 

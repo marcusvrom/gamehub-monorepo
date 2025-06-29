@@ -9,6 +9,7 @@ const cashFlowRoutes = require('./cash-flow.js');
 const productRoutes = require('./products');
 const salesRoutes = require('./sales');
 const gamesRoutes = require('./games');
+const eventRoutes = require('./events');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -31,6 +32,7 @@ app.use('/api/cash-flow', cashFlowRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/sales', salesRoutes);
 app.use('/api/games', gamesRoutes);
+app.use('/api/events', eventRoutes)
 
 // Roda todo dia à 1h da manhã (fuso de São Paulo)
 cron.schedule('0 1 * * *', async () => { 

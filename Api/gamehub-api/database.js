@@ -126,6 +126,21 @@ const createTables = async () => {
       )
     `);
 
+    // Tabela de Eventos
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS events (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
+        start_time TIMESTAMPTZ NOT NULL,
+        end_time TIMESTAMPTZ NOT NULL,
+        ticket_price NUMERIC(10, 2) NOT NULL DEFAULT 0,
+        capacity INTEGER,
+        status VARCHAR(50) DEFAULT 'AGENDADO' NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     // Tabela de Configurações
     await client.query(
       `CREATE TABLE IF NOT EXISTS settings (setting_key VARCHAR(255) PRIMARY KEY NOT NULL, setting_value TEXT NOT NULL)`
