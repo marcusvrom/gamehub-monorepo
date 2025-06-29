@@ -215,6 +215,29 @@ router.get('/station-usage', authMiddleware, async (req, res) => {
     });
 });
 
+router.get('/peak-hours-by-day', authMiddleware, async (req, res) => {
+    await handleRequest(res, async () => {
+        const timezone = 'America/Sao_Paulo';
+        
+        // Esta query extrai o dia da semana (ISODOW: 1=Segunda, 7=Domingo) e a hora
+        // para cada sessão nos últimos 30 dias.
+        const sql = `
+            SELECT 
+                EXTRACT(ISODOW FROM entry_time AT TIME ZONE $1) as day_of_week, 
+                EXTRACT(HOUR FROM entry_time AT TIME ZONE $1) as hour, 
+                COUNT(id) as "value" -- ngx-charts espera a propriedade "value"
+            FROM sessions
+            WHERE 
+                entry_time >= CURRENT_DATE - INTERVAL '30 days' AND
+                exit_time IS NOT NULL
+            GROUP BY day_of_week, hour
+            ORDER BY day_of_week, hour;
+        `;
+        const { rows } = await db.query(sql, [timezone]);
+        res.json(rows);
+    });
+});
+
 async function getSummaryData(startDate, endDate, timezone) {
     const baseQuery = `
         WITH all_revenue AS (
