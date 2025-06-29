@@ -100,52 +100,80 @@ router.get('/financial-details', authMiddleware, async (req, res) => {
 
         const offset = (page - 1) * pageSize;
         const timezone = 'America/Sao_Paulo';
-        const rangeFilter = `WHERE transaction_date AT TIME ZONE '${timezone}' BETWEEN $1 AND $2`;
 
-        // Query 1: Resumo dos KPIs (versão completa)
-        const summarySql = `
+        // 1. Criamos uma "tabela virtual" em memória com TODAS as fontes de receita usando WITH e UNION ALL
+        const baseQuery = `
+            WITH all_revenue AS (
+                -- Receitas da tabela de transações (horas e pacotes)
+                SELECT 
+                    id,
+                    client_id,
+                    transaction_date AS revenue_date,
+                    amount_paid,
+                    payment_method,
+                    transaction_type,
+                    notes
+                FROM transactions
+                WHERE transaction_date AT TIME ZONE $1 BETWEEN $2 AND $3
+
+                UNION ALL
+
+                -- Receitas da tabela de sales (produtos do PDV)
+                SELECT
+                    id,
+                    client_id,
+                    sale_date AS revenue_date,
+                    total_amount AS amount_paid,
+                    payment_method,
+                    'VENDA_PRODUTO' AS transaction_type,
+                    'Venda de produtos' AS notes
+                FROM sales
+                WHERE sale_date AT TIME ZONE $1 BETWEEN $2 AND $3
+            )
+        `;
+
+        // 2. Agora, executamos nossas queries de agregação sobre essa tabela virtual "all_revenue"
+        const summarySql = baseQuery + `
             SELECT
                 COALESCE(SUM(amount_paid), 0) AS "totalRevenue",
                 COUNT(id) AS "totalTransactions",
                 COALESCE(SUM(CASE WHEN payment_method = 'PIX' THEN amount_paid ELSE 0 END), 0) AS "revenueByPix",
                 COALESCE(SUM(CASE WHEN payment_method IN ('CREDITO', 'DEBITO') THEN amount_paid ELSE 0 END), 0) AS "revenueByCard",
                 COALESCE(SUM(CASE WHEN payment_method = 'DINHEIRO' THEN amount_paid ELSE 0 END), 0) AS "revenueByCash"
-            FROM transactions ${rangeFilter}
+            FROM all_revenue
         `;
 
-        // Query 2: Faturamento diário para o gráfico (versão completa)
-        const dailyRevenueSql = `
+        const dailyRevenueSql = baseQuery + `
             SELECT 
-                date(transaction_date AT TIME ZONE '${timezone}') AS "name", 
+                date(revenue_date AT TIME ZONE '${timezone}') AS "name", 
                 SUM(amount_paid) AS "value"
-            FROM transactions ${rangeFilter}
-            GROUP BY date(transaction_date AT TIME ZONE '${timezone}')
+            FROM all_revenue
+            GROUP BY date(revenue_date AT TIME ZONE '${timezone}')
             ORDER BY name ASC
         `;
         
-        // Query 3: Lista detalhada de transações com paginação (sem alterações)
-        const transactionsSql = `
-            SELECT t.*, c.name as client_name 
-            FROM transactions t
-            LEFT JOIN clients c ON t.client_id = c.id
-            ${rangeFilter}
-            ORDER BY transaction_date DESC
-            LIMIT $3 OFFSET $4
+        // A query de transações detalhadas também precisa ser unificada, mas é mais complexa.
+        // Por simplicidade, vamos mantê-la lendo apenas de 'transactions' por enquanto, ou podemos unificá-la também.
+        // Vamos unificar para o relatório ficar completo:
+        const transactionsSql = baseQuery + `
+            SELECT *
+            FROM all_revenue
+            ORDER BY revenue_date DESC
+            LIMIT $4 OFFSET $5
         `;
 
-        // Query 4: Contagem total de transações para paginação (sem alterações)
-        const totalCountSql = `SELECT COUNT(id) as total FROM transactions ${rangeFilter}`;
+        const totalCountSql = baseQuery + `SELECT COUNT(id) AS total FROM all_revenue`;
 
-        // Executa todas as queries completas em paralelo
         const [summaryResult, dailyRevenueResult, transactionsResult, totalCountResult] = await Promise.all([
-            db.query(summarySql, [startDate, endDate]),
-            db.query(dailyRevenueSql, [startDate, endDate]),
-            db.query(transactionsSql, [startDate, endDate, pageSize, offset]),
-            db.query(totalCountSql, [startDate, endDate])
+            db.query(summarySql, [timezone, startDate, endDate]),
+            db.query(dailyRevenueSql, [timezone, startDate, endDate]),
+            db.query(transactionsSql, [timezone, startDate, endDate, pageSize, offset]),
+            db.query(totalCountSql, [timezone, startDate, endDate])
         ]);
         
         const totalItems = totalCountResult.rows[0].total;
 
+        // Montamos a resposta final com os dados unificados
         res.json({
             summary: summaryResult.rows[0],
             dailyRevenue: dailyRevenueResult.rows,

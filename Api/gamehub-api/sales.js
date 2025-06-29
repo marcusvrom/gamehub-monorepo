@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../database');
-const authMiddleware = require('../auth');
+const db = require('./database');
+const authMiddleware = require('./auth');
 
 const handleRequest = async (res, callback) => {
   try {
