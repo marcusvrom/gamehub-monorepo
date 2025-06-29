@@ -74,6 +74,26 @@ const createTables = async () => {
         transaction_date TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS sales (
+        id SERIAL PRIMARY KEY,
+        client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL, -- Permite vendas para não-clientes (NULL)
+        total_amount NUMERIC(10, 2) NOT NULL,
+        payment_method VARCHAR(50) NOT NULL,
+        sale_date TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS sale_items (
+        id SERIAL PRIMARY KEY,
+        sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+        product_id INTEGER NOT NULL REFERENCES products(id),
+        quantity_sold INTEGER NOT NULL,
+        price_per_item NUMERIC(10, 2) NOT NULL
+      )
+    `);
     
     // Tabela de Configurações
     await client.query(`CREATE TABLE IF NOT EXISTS settings (setting_key VARCHAR(255) PRIMARY KEY NOT NULL, setting_value TEXT NOT NULL)`);

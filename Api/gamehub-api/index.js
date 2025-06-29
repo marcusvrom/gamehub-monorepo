@@ -7,6 +7,7 @@ const routes = require('./routes');
 const reportRoutes = require('./reports');
 const cashFlowRoutes = require('./cash-flow.js');
 const productRoutes = require('./products');
+const salesRoutes = require('./sales');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -27,6 +28,7 @@ app.use('/api', routes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/cash-flow', cashFlowRoutes);
 app.use('/api/products', productRoutes);
+app.use('/api/sales', salesRoutes);
 
 // Roda todo dia à 1h da manhã (fuso de São Paulo)
 cron.schedule('0 1 * * *', async () => { 
