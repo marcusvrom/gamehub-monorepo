@@ -97,86 +97,48 @@ router.get('/financial-details', authMiddleware, async (req, res) => {
         if (!startDate || !endDate) {
             return res.status(400).json({ message: 'As datas de início e fim são obrigatórias.' });
         }
-
+        
         const offset = (page - 1) * pageSize;
         const timezone = 'America/Sao_Paulo';
+        const rangeFilter = `WHERE T.revenue_date AT TIME ZONE '${timezone}' BETWEEN $1 AND $2`;
 
-        // 1. Criamos uma "tabela virtual" em memória com TODAS as fontes de receita usando WITH e UNION ALL
         const baseQuery = `
-            WITH all_revenue AS (
-                -- Receitas da tabela de transações (horas e pacotes)
+            WITH all_transactions AS (
                 SELECT 
-                    id,
-                    client_id,
-                    transaction_date AS revenue_date,
-                    amount_paid,
-                    payment_method,
-                    transaction_type,
-                    notes
-                FROM transactions
-                WHERE transaction_date AT TIME ZONE $1 BETWEEN $2 AND $3
-
+                    'HORAS/PACOTE' as sale_type, t.id, t.transaction_date as revenue_date, c.name as client_name, 
+                    t.notes, t.amount_paid, t.payment_method, NULL as product_name, t.hours_added as quantity_sold
+                FROM transactions t
+                LEFT JOIN clients c ON t.client_id = c.id
+                
                 UNION ALL
 
-                -- Receitas da tabela de sales (produtos do PDV)
-                SELECT
-                    id,
-                    client_id,
-                    sale_date AS revenue_date,
-                    total_amount AS amount_paid,
-                    payment_method,
-                    'VENDA_PRODUTO' AS transaction_type,
-                    'Venda de produtos' AS notes
-                FROM sales
-                WHERE sale_date AT TIME ZONE $1 BETWEEN $2 AND $3
+                SELECT 
+                    'PRODUTO' as sale_type, s.id, s.sale_date as revenue_date, c.name as client_name, 
+                    p.name as notes, si.price_per_item * si.quantity_sold as amount_paid, 
+                    s.payment_method, p.name as product_name, si.quantity_sold
+                FROM sales s
+                JOIN sale_items si ON s.id = si.sale_id
+                JOIN products p ON si.product_id = p.id
+                LEFT JOIN clients c ON s.client_id = c.id
             )
+            SELECT * FROM all_transactions T
         `;
 
-        // 2. Agora, executamos nossas queries de agregação sobre essa tabela virtual "all_revenue"
-        const summarySql = baseQuery + `
-            SELECT
-                COALESCE(SUM(amount_paid), 0) AS "totalRevenue",
-                COUNT(id) AS "totalTransactions",
-                COALESCE(SUM(CASE WHEN payment_method = 'PIX' THEN amount_paid ELSE 0 END), 0) AS "revenueByPix",
-                COALESCE(SUM(CASE WHEN payment_method IN ('CREDITO', 'DEBITO') THEN amount_paid ELSE 0 END), 0) AS "revenueByCard",
-                COALESCE(SUM(CASE WHEN payment_method = 'DINHEIRO' THEN amount_paid ELSE 0 END), 0) AS "revenueByCash"
-            FROM all_revenue
-        `;
+        const transactionsSql = `${baseQuery} ${rangeFilter} ORDER BY T.revenue_date DESC LIMIT $3 OFFSET $4`;
+        const totalCountSql = `WITH all_transactions AS (SELECT id, transaction_date AS revenue_date FROM transactions UNION ALL SELECT id, sale_date AS revenue_date FROM sales) SELECT COUNT(id) AS total FROM all_transactions T ${rangeFilter}`;
 
-        const dailyRevenueSql = baseQuery + `
-            SELECT 
-                date(revenue_date AT TIME ZONE '${timezone}') AS "name", 
-                SUM(amount_paid) AS "value"
-            FROM all_revenue
-            GROUP BY date(revenue_date AT TIME ZONE '${timezone}')
-            ORDER BY name ASC
-        `;
-        
-        // A query de transações detalhadas também precisa ser unificada, mas é mais complexa.
-        // Por simplicidade, vamos mantê-la lendo apenas de 'transactions' por enquanto, ou podemos unificá-la também.
-        // Vamos unificar para o relatório ficar completo:
-        const transactionsSql = baseQuery + `
-            SELECT *
-            FROM all_revenue
-            ORDER BY revenue_date DESC
-            LIMIT $4 OFFSET $5
-        `;
-
-        const totalCountSql = baseQuery + `SELECT COUNT(id) AS total FROM all_revenue`;
-
-        const [summaryResult, dailyRevenueResult, transactionsResult, totalCountResult] = await Promise.all([
-            db.query(summarySql, [timezone, startDate, endDate]),
-            db.query(dailyRevenueSql, [timezone, startDate, endDate]),
-            db.query(transactionsSql, [timezone, startDate, endDate, pageSize, offset]),
-            db.query(totalCountSql, [timezone, startDate, endDate])
+        // Executa a busca de dados do resumo e das transações paginadas em paralelo
+        const [summaryAndChartData, transactionsResult, totalCountResult] = await Promise.all([
+            getSummaryData(startDate, endDate, timezone), // Chama a nova função real
+            db.query(transactionsSql, [startDate, endDate, pageSize, offset]),
+            db.query(totalCountSql, [startDate, endDate])
         ]);
         
         const totalItems = totalCountResult.rows[0].total;
 
-        // Montamos a resposta final com os dados unificados
         res.json({
-            summary: summaryResult.rows[0],
-            dailyRevenue: dailyRevenueResult.rows,
+            summary: summaryAndChartData.summary,
+            dailyRevenue: summaryAndChartData.dailyRevenue,
             transactions: {
                 items: transactionsResult.rows,
                 totalItems: Number(totalItems),
@@ -184,6 +146,27 @@ router.get('/financial-details', authMiddleware, async (req, res) => {
                 totalPages: Math.ceil(totalItems / pageSize)
             }
         });
+    });
+});
+
+// Nova rota para o gráfico de produtos mais vendidos
+router.get('/top-products', authMiddleware, async (req, res) => {
+    await handleRequest(res, async () => {
+        const { startDate, endDate } = req.query;
+        if (!startDate || !endDate) return res.status(400).json({ message: 'Datas são obrigatórias.'});
+
+        const sql = `
+            SELECT p.name, SUM(si.quantity_sold) as value
+            FROM sale_items si
+            JOIN products p ON si.product_id = p.id
+            JOIN sales s ON si.sale_id = s.id
+            WHERE s.sale_date BETWEEN $1 AND $2
+            GROUP BY p.name
+            ORDER BY value DESC
+            LIMIT 5
+        `;
+        const { rows } = await db.query(sql, [startDate, endDate]);
+        res.json(rows);
     });
 });
 
@@ -215,5 +198,49 @@ router.get('/station-usage', authMiddleware, async (req, res) => {
         res.json(rows);
     });
 });
+
+async function getSummaryData(startDate, endDate, timezone) {
+    const baseQuery = `
+        WITH all_revenue AS (
+            SELECT transaction_date AS revenue_date, amount_paid, payment_method FROM transactions
+            WHERE (transaction_date AT TIME ZONE $1) BETWEEN $2 AND $3
+            UNION ALL
+            SELECT sale_date AS revenue_date, total_amount AS amount_paid, payment_method FROM sales
+            WHERE (sale_date AT TIME ZONE $1) BETWEEN $2 AND $3
+        )
+    `;
+
+    // Query para os KPIs de resumo
+    const summarySql = baseQuery + `
+        SELECT
+            COALESCE(SUM(amount_paid), 0) AS "totalRevenue",
+            COUNT(*) AS "totalTransactions",
+            COALESCE(SUM(CASE WHEN payment_method = 'PIX' THEN amount_paid ELSE 0 END), 0) AS "revenueByPix",
+            COALESCE(SUM(CASE WHEN payment_method IN ('CREDITO', 'DEBITO') THEN amount_paid ELSE 0 END), 0) AS "revenueByCard",
+            COALESCE(SUM(CASE WHEN payment_method = 'DINHEIRO' THEN amount_paid ELSE 0 END), 0) AS "revenueByCash"
+        FROM all_revenue
+    `;
+
+    // Query para o gráfico de faturamento diário
+    const dailyRevenueSql = baseQuery + `
+        SELECT 
+            date(revenue_date AT TIME ZONE $1) AS "name", 
+            SUM(amount_paid) AS "value"
+        FROM all_revenue
+        GROUP BY date(revenue_date AT TIME ZONE $1)
+        ORDER BY name ASC
+    `;
+
+    // Executa as duas queries em paralelo
+    const [summaryResult, dailyRevenueResult] = await Promise.all([
+        db.query(summarySql, [timezone, startDate, endDate]),
+        db.query(dailyRevenueSql, [timezone, startDate, endDate])
+    ]);
+    
+    return {
+        summary: summaryResult.rows[0],
+        dailyRevenue: dailyRevenueResult.rows
+    };
+}
 
 module.exports = router;
