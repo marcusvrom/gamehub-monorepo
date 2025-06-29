@@ -19,12 +19,13 @@ const handleRequest = async (res, callback) => {
 
 // --- CRUD DE EVENTOS ---
 
+// --- CRUD DE EVENTOS ---
+
 // GET - Listar todos os eventos
 router.get('/', authMiddleware, async (req, res) => {
   await handleRequest(res, async () => {
-    // Adicionamos a contagem de participantes a cada evento
     const sql = `
-      SELECT e.*, COUNT(er.id) AS participant_count
+      SELECT e.*, COUNT(er.id)::integer AS participant_count
       FROM events e
       LEFT JOIN event_registrations er ON e.id = er.event_id
       GROUP BY e.id
@@ -39,11 +40,9 @@ router.get('/', authMiddleware, async (req, res) => {
 router.get('/:id', authMiddleware, async (req, res) => {
     await handleRequest(res, async () => {
         const { id } = req.params;
-        // Busca os detalhes do evento
         const eventResult = await db.query('SELECT * FROM events WHERE id = $1', [id]);
         if (eventResult.rows.length === 0) return res.status(404).json({ message: 'Evento não encontrado.' });
         
-        // Busca os participantes inscritos neste evento
         const participantsSql = `
             SELECT er.*, c.name as client_name 
             FROM event_registrations er
@@ -61,14 +60,55 @@ router.get('/:id', authMiddleware, async (req, res) => {
 });
 
 // POST - Criar um novo evento
-router.post('/', authMiddleware, async (req, res) => { /* ...código existente, sem alterações... */ });
+router.post('/', authMiddleware, async (req, res) => {
+  console.log('[POST /events] Rota iniciada. Body:', req.body);
+  await handleRequest(res, async () => {
+    const { name, description, start_time, end_time, ticket_price, capacity, status } = req.body;
+    if (!name || !start_time || !end_time) {
+      console.log('[POST /events] Erro de validação.');
+      return res.status(400).json({ message: 'Nome, data de início e data de fim são obrigatórios.' });
+    }
+    
+    console.log('[POST /events] Parâmetros validados. Preparando SQL...');
+    const sql = `
+      INSERT INTO events (name, description, start_time, end_time, ticket_price, capacity, status) 
+      VALUES ($1, $2, $3, $4, $5, $6, $7) 
+      RETURNING *
+    `;
+    const params = [name, description, start_time, end_time, ticket_price || 0, capacity, status || 'AGENDADO'];
+    
+    console.log('[POST /events] Executando query...');
+    const { rows } = await db.query(sql, params);
+    console.log('[POST /events] Query executada com sucesso. Enviando resposta.');
+    
+    res.status(201).json(rows[0]);
+  });
+});
 
 // PUT - Atualizar um evento existente
-router.put('/:id', authMiddleware, async (req, res) => { /* ...código existente, sem alterações... */ });
+router.put('/:id', authMiddleware, async (req, res) => {
+  await handleRequest(res, async () => {
+    const { id } = req.params;
+    const { name, description, start_time, end_time, ticket_price, capacity, status } = req.body;
+    if (!name || !start_time || !end_time) return res.status(400).json({ message: 'Nome, data de início e data de fim são obrigatórios.' });
+    
+    const sql = `UPDATE events SET name = $1, description = $2, start_time = $3, end_time = $4, ticket_price = $5, capacity = $6, status = $7 WHERE id = $8`;
+    const params = [name, description, start_time, end_time, ticket_price || 0, capacity, status, id];
+    const result = await db.query(sql, params);
+    if (result.rowCount === 0) return res.status(404).json({ message: 'Evento não encontrado.' });
+    res.json({ message: 'Evento atualizado com sucesso!' });
+  });
+});
 
 // DELETE - Deletar um evento
-router.delete('/:id', authMiddleware, async (req, res) => { /* ...código existente, sem alterações... */ });
-
+router.delete('/:id', authMiddleware, async (req, res) => {
+  await handleRequest(res, async () => {
+    const { id } = req.params;
+    const result = await db.query('DELETE FROM events WHERE id = $1', [id]);
+    if (result.rowCount === 0) return res.status(404).json({ message: 'Evento não encontrado.' });
+    res.json({ message: 'Evento deletado com sucesso!' });
+  });
+});
 
 // --- GERENCIAMENTO DE PARTICIPANTES ---
 
